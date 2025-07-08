@@ -30,7 +30,7 @@ dnl checks for header files
 dnl **********************************
 AC_HEADER_STDC
 AC_CHECK_HEADERS(stdio.h stdlib.h stdbool.h string.h)
-AC_CHECK_HEADERS(unistd.h getopt.h errno.h time.h sys/time.h)
+AC_CHECK_HEADERS(unistd.h getopt.h errno.h fcntl.h sys/types.h sys/stat.h time.h sys/time.h)
 AC_CHECK_HEADERS(mosquitto.h json/json.h)
 
 dnl **********************************

@@ -11,7 +11,10 @@
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
+#include <fcntl.h>
 #include <sys/time.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <mosquitto.h>
 #include <json-c/json.h>
 
@@ -20,12 +23,16 @@
 #define NOTU __attribute__((unused))
 #define DEFAULT_MQTT_SERVER "10.0.0.4"
 #define DEFAULT_MQTT_PORT 1883
+#define DEFAULT_LOG_PATH "/srvdata/sensor-data"
 
 static unsigned verbose_G = 0;
 static char *mqttServer_pG = DEFAULT_MQTT_SERVER;
 static unsigned mqttPort_G = DEFAULT_MQTT_PORT;
 static char mqttTopic_G[65535];
 static struct mosquitto *mosq_G = NULL;
+static char *shellyDeviceName_pG = NULL;
+static char *logFileName_pG = NULL;
+static int logFileFd_G = -1;
 
 static void cleanup (void);
 static void parse_cmdline (int argc, char *argv[]);
@@ -58,6 +65,9 @@ usage (char *pgm_p)
 	printf("    -p | --port <p>    Specify the port <p> to connect to on the server (default: %u)\n", DEFAULT_MQTT_PORT);
 	printf("    -t | --topic <t>   Specify the full topic to which to subsribe on the server\n");
 	printf("    -d | --device <d>  Specify the Shelly device, topic becomes: '<device>/events/rpc'\n");
+	printf("    -l | --logfile <l> Specify the file into which to log the data\n");
+	printf("                       If not specified and -d <device> is specified, log to %s/${device}.data\n", DEFAULT_LOG_PATH);
+	printf("                       If not specified and -d <device> is not specified, log to stdout\n");
 }
 
 static void
@@ -66,6 +76,11 @@ cleanup (void)
 	if (mosq_G != NULL) {
 		mosquitto_destroy(mosq_G);
 		mosquitto_lib_cleanup();
+	}
+	if (logFileName_pG != NULL) {
+		free(logFileName_pG);
+		if (logFileFd_G != -1)
+			close(logFileFd_G);
 	}
 }
 
@@ -83,12 +98,13 @@ parse_cmdline (int argc, char *argv[])
 		{"port",    required_argument, NULL, 'p'},
 		{"topic",   required_argument, NULL, 't'},
 		{"device",  required_argument, NULL, 'd'},
+		{"logfile", required_argument, NULL, 'l'},
 		{NULL, 0, NULL, 0},
 	};
 
 	mqttTopic_G[0] = 0;
 	while (1) {
-		c = getopt_long(argc, argv, "hvVs:p:t:d:", longOpts, NULL);
+		c = getopt_long(argc, argv, "hvVs:p:t:d:l:", longOpts, NULL);
 		if (c == -1)
 			break;
 		switch (c) {
@@ -132,6 +148,16 @@ parse_cmdline (int argc, char *argv[])
 					exit(EXIT_FAILURE);
 				}
 				sprintf(mqttTopic_G, "%s/events/rpc", optarg);
+				shellyDeviceName_pG = optarg;
+				break;
+
+			case 'l':
+				logFileName_pG = (char*)malloc(strlen(optarg) + 1);
+				if (logFileName_pG == NULL) {
+					perror("malloc(optarg)");
+					exit(EXIT_FAILURE);
+				}
+				sprintf(logFileName_pG, "%s", optarg);
 				break;
 
 			default:
@@ -151,6 +177,27 @@ parse_cmdline (int argc, char *argv[])
 		printf("either a topic or a device needs to be provided\n");
 		exit(EXIT_FAILURE);
 	}
+
+	// setup logging
+	if ((logFileName_pG == NULL) && (shellyDeviceName_pG != NULL)) {
+		logFileName_pG = (char*)malloc(strlen(DEFAULT_LOG_PATH) + strlen(shellyDeviceName_pG) + 16);
+		if (logFileName_pG == NULL) {
+			perror("malloc()");
+			exit(EXIT_FAILURE);
+		}
+		sprintf(logFileName_pG, "%s/%s.data", DEFAULT_LOG_PATH, shellyDeviceName_pG);
+	}
+	if (verbose_G > 0)
+		printf("logging to logfile: %s\n", (logFileName_pG == NULL)? "<stdout>":logFileName_pG);
+	if (logFileName_pG != NULL) {
+		logFileFd_G = open(logFileName_pG, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+		if (logFileFd_G == -1) {
+			perror("open(log)");
+			exit(EXIT_FAILURE);
+		}
+	}
+	else
+		logFileFd_G = fileno(stdout);
 }
 
 static void
@@ -231,37 +278,32 @@ report_shelly_data (json_object *jsonObj_p, char *key_p, char *label_p, DataType
 	/* preconds */
 
 	if (label_p != NULL)
-		printf(" %s:", label_p);
+		dprintf(logFileFd_G, " %s:", label_p);
 
 	found_G = false;
 	find_json_object_by_key(jsonObj_p, key_p);
 
-	if (!found_G) {
-		printf("NaN");
-		return;
+	if (found_G) {
+		switch (datatype) {
+			case dt__double_as_int:
+				if (json_object_get_type(foundObj_pG) == json_type_double) {
+					dprintf(logFileFd_G, "%d", (int)(json_object_get_double(foundObj_pG) * 1000));
+					return;
+				}
+				break;
+
+			case dt__int:
+				if (json_object_get_type(foundObj_pG) == json_type_int) {
+					dprintf(logFileFd_G, "%d", json_object_get_int(foundObj_pG));
+					return;
+				}
+				break;
+
+			default:
+				break;
+		}
 	}
-
-	switch (datatype) {
-		case dt__double_as_int:
-			if (json_object_get_type(foundObj_pG) != json_type_double) {
-				printf("NaN");
-				return;
-			}
-			printf("%d", (int)(json_object_get_double(foundObj_pG) * 1000));
-			break;
-
-		case dt__int:
-			if (json_object_get_type(foundObj_pG) != json_type_int) {
-				printf("NaN");
-				return;
-			}
-			printf("%d", json_object_get_int(foundObj_pG));
-			break;
-
-		default:
-			printf("NaN");
-			break;
-	}
+	dprintf(logFileFd_G, "NaN");
 }
 
 static void
@@ -291,7 +333,7 @@ parse_shellyht_message (json_object *jsonObj_p)
 	// timestamp
 	now = time(NULL);
 	strftime(timeBuf, sizeof(timeBuf), "%F %T %z", localtime(&now));
-	printf("%s", timeBuf);
+	dprintf(logFileFd_G, "%s", timeBuf);
 
 	// data
 	report_shelly_data(jsonObj_p, "tC", "temp", dt__double_as_int);
@@ -300,7 +342,7 @@ parse_shellyht_message (json_object *jsonObj_p)
 	report_shelly_data(jsonObj_p, "percent", "battery", dt__int);
 	report_shelly_data(jsonObj_p, "V", "battV", dt__double_as_int);
 
-	printf("\n");
+	dprintf(logFileFd_G, "\n");
 }
 
 static void
