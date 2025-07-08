@@ -1,0 +1,10 @@
+**/Makefile.in
+aclocal.m4
+autom4te.cache/
+configure
+
+cfg/compile
+cfg/config.h.in*
+cfg/depcomp
+cfg/install-sh
+cfg/missing

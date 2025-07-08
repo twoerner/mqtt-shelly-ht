@@ -1,0 +1,14 @@
+mqtt-shelly-ht
+^^^^^^^^^^^^^^
+
+A C program to process mqtt messages from a Shelly Gen3 H&T device
+(Humidity & Temperature) and output a set of data in one line prefixed with
+a timestamp, currently:
+	- temperature (in °C * 1000 as an integer e.g. 23.7°C → 23700)
+	- relative humidity (in % * 1000 as an integer e.g. 54.4% → 54400)
+	- wifi received signal strength indicator (rssi) (in dB as an integer, usually negative)
+	- battery charge (in % as an integer, 0 to 100)
+	- battery voltage (in V * 1000 as an integer e.g. 6.13V → 6130)
+
+e.g.
+2025-07-08 11:05:01 -0400 temp:23700 humidity:54400 rssi:-63 battery:100 battV:6130
