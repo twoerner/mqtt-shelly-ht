@@ -4,4 +4,4 @@
 # extras/Makefile.am
 ########################
 SUBDIRS = 
-EXTRA_DIST = README.message message
+EXTRA_DIST = README.message message mqtt-shelly-ht@.service

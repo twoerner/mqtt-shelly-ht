@@ -1,0 +1,13 @@
+[Unit]
+Description=mqtt-shelly-ht
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+ExecStart=/usr/bin/mqtt-shelly-ht -d shellyhtg3-%i
+
+[Install]
+WantedBy=multi-user.target
